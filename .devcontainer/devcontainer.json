@@ -1,0 +1,20 @@
+{
+  "name": "Hermes IA Hosting Core",
+  "image": "://microsoft.com",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "version": "latest"
+    }
+  },
+  "postCreateCommand": "pip install flask docker requests && curl -fsSL https://ollama.com | sh",
+  "waitFor": "postCreateCommand",
+  "postStartCommand": "ollama serve > /dev/null 2>&1 & sleep 5 && ollama run qwen2.5-coder:1.5b",
+  "forwardPorts":[5000, 11434],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python"
+      ]
+    }
+  }
+}
