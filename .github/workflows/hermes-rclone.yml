@@ -1,0 +1,68 @@
+name: Hermes Rclone
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/hermes-rclone.yml']
+  schedule:
+    - cron: '17 11 * * *'
+permissions:
+  contents: read
+concurrency:
+  group: hermes-rclone
+  cancel-in-progress: false
+jobs:
+  restore:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Obtener fuente fijada de Rclone
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: rclone/rclone
+          ref: be8d6044eacb843b74d335db0c5fbe09222031fe
+          persist-credentials: false
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Compilar Hermes Rclone para Linux
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > hermes_main.go <<'GO'
+          package main
+          import (
+              "github.com/rclone/rclone/cmd"
+              _ "github.com/rclone/rclone/backend/local"
+              _ "github.com/rclone/rclone/backend/crypt"
+              _ "github.com/rclone/rclone/backend/union"
+              _ "github.com/rclone/rclone/backend/s3"
+              _ "github.com/rclone/rclone/cmd/copyto"
+              _ "github.com/rclone/rclone/cmd/obscure"
+              _ "github.com/rclone/rclone/cmd/version"
+          )
+          func main() { cmd.Main() }
+          GO
+          CGO_ENABLED=0 go build -mod=readonly -trimpath -o "$RUNNER_TEMP/hermes-rclone" hermes_main.go
+          go mod verify
+          "$RUNNER_TEMP/hermes-rclone" version
+          sha256sum "$RUNNER_TEMP/hermes-rclone" >> "$GITHUB_STEP_SUMMARY"
+      - name: Restaurar y comparar datos sintéticos
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          r="$RUNNER_TEMP/hermes-rclone"
+          d=$(mktemp -d)
+          trap 'rm -rf "$d"' EXIT
+          mkdir "$d/a" "$d/b"
+          export RCLONE_CONFIG="$d/rclone.conf"
+          secret=$(openssl rand -hex 32 | "$r" obscure -)
+          printf '[pool]\ntype = union\nupstreams = %s/a %s/b\ncreate_policy = ff\n[encrypted]\ntype = crypt\nremote = pool:\npassword = %s\n' "$d" "$d" "$secret" > "$RCLONE_CONFIG"
+          head -c 1048576 /dev/urandom > "$d/original"
+          "$r" copyto "$d/original" encrypted:probe
+          "$r" copyto encrypted:probe "$d/restored"
+          cmp "$d/original" "$d/restored"
+          echo 'Restauración verificada byte por byte: 1 MiB, crypt sobre union local.' >> "$GITHUB_STEP_SUMMARY"
