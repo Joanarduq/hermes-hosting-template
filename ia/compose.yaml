@@ -1,0 +1,16 @@
+name: hermes-ia-personal
+services:
+  freellmapi:
+    build:
+      context: https://github.com/tashfeenahmed/freellmapi.git#4c8c2f834b587b6acc3f00698ad8f6468bea1aa2
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Configura la clave persistente en un archivo privado}
+    ports:
+      - "127.0.0.1:${HERMES_IA_PORT:-3001}:3001"
+    volumes:
+      - datos:/app/server/data
+volumes:
+  datos:
