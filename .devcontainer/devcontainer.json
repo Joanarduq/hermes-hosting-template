@@ -1,20 +1,28 @@
 {
-  "name": "Hermes IA Hosting Core",
-  "image": "://microsoft.com",
+  "name": "Hermes · Docker y Codex",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
   "features": {
     "ghcr.io/devcontainers/features/docker-in-docker:2": {
       "version": "latest"
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "22"
     }
   },
-  "postCreateCommand": "pip install flask docker requests && curl -fsSL https://ollama.com | sh",
+  "postCreateCommand": "python -m venv ~/.local/share/hermes-venv && ~/.local/share/hermes-venv/bin/pip install flask docker requests && npm install --prefix ~/.local --global @openai/codex && ~/.local/bin/codex --version",
   "waitFor": "postCreateCommand",
-  "postStartCommand": "ollama serve > /dev/null 2>&1 & sleep 5 && ollama run qwen2.5-coder:1.5b",
-  "forwardPorts":[5000, 11434],
+  "forwardPorts": [
+    5000
+  ],
   "customizations": {
     "vscode": {
       "extensions": [
         "ms-python.python"
       ]
     }
+  },
+  "remoteUser": "vscode",
+  "remoteEnv": {
+    "PATH": "${containerEnv:PATH}:/home/vscode/.local/bin"
   }
 }
