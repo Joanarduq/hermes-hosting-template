@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['.github/workflows/hermes-rclone.yml']
+    paths: ['.github/workflows/hermes-rclone.yml', 'tests/two-tenants.sh']
   schedule:
     - cron: '17 11 * * *'
 permissions:
@@ -66,3 +66,10 @@ jobs:
           "$r" copyto encrypted:probe "$d/restored"
           cmp "$d/original" "$d/restored"
           echo 'Restauración verificada byte por byte: 1 MiB, crypt sobre union local.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Obtener pruebas de Hermes
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          path: hermes-tests
+          persist-credentials: false
+      - name: Verificar dos clientes y cuota concurrente
+        run: bash hermes-tests/tests/two-tenants.sh "$RUNNER_TEMP/hermes-rclone"
