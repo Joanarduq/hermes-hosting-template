@@ -3,6 +3,7 @@ import os
 import secrets
 import subprocess
 import sys
+import time
 import tempfile
 from pathlib import Path
 
@@ -20,6 +21,71 @@ def configure(root, name, password, vault):
     config.write_text(f"[vault]\ntype = crypt\nremote = {vault}\n"
                       f"filename_encryption = off\npassword = {secret}\n")
     return config
+
+
+def exercise_external_stop(root, config, original):
+    # One controller serializes launches, revocation and publication for this job.
+    root.mkdir()
+    stage = root / "staging"
+    stage.mkdir()
+    partial = stage / "data"
+    final = root / "restored"
+    revoked = root / "revoked"
+    launches = 0
+
+    def launch(*options):
+        nonlocal launches
+        if revoked.exists():
+            raise PermissionError("restore revoked")
+        worker = subprocess.Popen([binary, "--config", str(config), "--inplace",
+                                   "--local-no-preallocate", *options, "copyto",
+                                   "vault:probe", str(partial)])
+        launches += 1
+        return worker
+
+    def finish(worker):
+        if worker.wait(timeout=10) == 0 and not revoked.exists():
+            partial.replace(final)
+        else:
+            partial.unlink(missing_ok=True)
+
+    # Positive control uses the same staging and publication path.
+    finish(launch())
+    assert final.read_bytes() == original.read_bytes()
+    final.unlink()
+
+    worker = launch("--bwlimit", "128k")
+    try:
+        deadline = time.monotonic() + 25
+        while time.monotonic() < deadline:
+            assert worker.poll() is None, "restore finished before stop"
+            size = partial.stat().st_size if partial.exists() else 0
+            if 0 < size < original.stat().st_size:
+                break
+            time.sleep(0.02)
+        else:
+            raise AssertionError("no partial write observed")
+        assert not final.exists()
+        started = time.monotonic()
+        revoked.touch(exist_ok=False)
+        worker.terminate()
+        finish(worker)
+        elapsed = time.monotonic() - started
+        assert worker.returncode != 0 and not final.exists()
+        assert not list(stage.iterdir())
+        try:
+            launch()
+        except PermissionError:
+            pass
+        else:
+            raise AssertionError("revoked job restarted")
+        assert launches == 2 and not final.exists() and not list(stage.iterdir())
+        print(f"STOP PASS bytes={size} exit={worker.returncode} "
+              f"seconds={elapsed:.3f} published=0 staged=0 retry_launches=0")
+    finally:
+        if worker.poll() is None:
+            worker.kill()
+            worker.wait()
 
 
 def exercise(root):
@@ -72,6 +138,8 @@ def exercise(root):
     ciphertext.write_bytes(reference)
     assert restore(good, str(approved)) and approved.read_bytes() == original.read_bytes()
     print("Damaged ciphertext rejected; reference recovered byte-for-byte with same key")
+
+    exercise_external_stop(root / "stop-test", good, original)
 
 
 if not __debug__:
