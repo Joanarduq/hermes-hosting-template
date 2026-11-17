@@ -104,3 +104,24 @@ jobs:
           printf '%s  %s\n' '634709360e09f46c10fb20db2cd6eb445c5431e73b2bdf4cfda47a907d5d93f7' probe.bin '5533c2fcde267a70fa33e9759e9952b9f0f4532180bffee2a6d57df6b4e7838a' origin.txt | sha256sum --check --strict
           test "$(cat origin.txt)" = 'Hermes synthetic run 43998087212'
           echo 'HERMES_CROSS_RUN_OK source=43998087212 restored=2'
+  backup-source:
+    if: github.ref == 'refs/heads/pilot/hermes-restore-diagnostics' && github.event.head_commit.message == 'Back up the pinned Hermes main source tree'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: 42218cf6a449153cb331c75279aa95cde44725d7
+          persist-credentials: false
+      - name: Archivar el árbol versionado
+        run: |
+          set -eu
+          test "$(git rev-parse 'HEAD^{tree}')" = '54f541243f3def1d946a7e8c008d257ff0cbf3ae'
+          git archive --format=tar HEAD | gzip -n > "$RUNNER_TEMP/hermes-main.tar.gz"
+          cd "$RUNNER_TEMP"
+          sha256sum hermes-main.tar.gz | tee "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: hermes-main-42218cf6
+          path: ${{ runner.temp }}/hermes-main.tar.gz
+          if-no-files-found: error
+          retention-days: 30
