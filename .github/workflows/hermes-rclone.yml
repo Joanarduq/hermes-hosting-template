@@ -125,3 +125,27 @@ jobs:
           path: ${{ runner.temp }}/hermes-main.tar.gz
           if-no-files-found: error
           retention-days: 30
+  recover-source:
+    if: github.ref == 'refs/heads/pilot/hermes-restore-diagnostics' && github.event.head_commit.message == 'Restore and verify the archived Hermes source from run 43999653720'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: hermes-main-42218cf6
+          run-id: 43999653720
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/incoming
+      - name: Restaurar y contrastar el árbol Git completo
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/incoming"
+          printf '%s  hermes-main.tar.gz\n' '17837e348c590be05dc7a97f29fb066741ae2fc4b54581c76c2c727f43abb1db' | sha256sum -c -
+          destination=$(mktemp -d)
+          tar -xzf hermes-main.tar.gz -C "$destination"
+          cd "$destination"
+          git init -q
+          git add --force --all
+          actual=$(git write-tree)
+          test "$actual" = '54f541243f3def1d946a7e8c008d257ff0cbf3ae'
+          echo "HERMES_SOURCE_VERIFIED tree=$actual files=$(git ls-files | wc -l)"
