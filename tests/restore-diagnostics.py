@@ -88,6 +88,55 @@ def exercise_external_stop(root, config, original):
             worker.wait()
 
 
+def blind_cases(original, config, alternate, ciphertext, reference):
+    # Only BLIND_OBS records are disclosed to the diagnostic agent.
+    import hashlib
+    import json
+    import random
+
+    cases = [("key", True), ("object", True), (secrets.choice(["key", "object"]), False)]
+    random.SystemRandom().shuffle(cases)
+    truth = {}
+    observations = []
+    for cause, has_controls in cases:
+        case_id = secrets.token_hex(4)
+        active = alternate if cause == "key" else config
+        data = bytearray(reference)
+        if cause == "object":
+            data[-1] ^= 1
+        ciphertext.write_bytes(data)
+
+        def probe(selected):
+            with tempfile.TemporaryDirectory(dir=original.parent) as tmp:
+                output = Path(tmp) / "restored"
+                run = cli("--config", selected, "--retries", 1, "--low-level-retries", 1,
+                          "copyto", "vault:probe", output)
+                if run.returncode:
+                    if not any(t in run.stderr.lower() for t in (b"authenticat", b"bad block")):
+                        raise RuntimeError("unexpected probe failure")
+                    return "authentication_failure"
+                if output.read_bytes() != original.read_bytes():
+                    raise RuntimeError("integrity mismatch")
+                return "verified_bytes"
+
+        observed = {"id": case_id, "initial": probe(active)}
+        assert observed["initial"] == "authentication_failure"
+        if has_controls:
+            observed["ciphertext_matches_reference"] = ciphertext.read_bytes() == reference
+            observed["trusted_config_current_object"] = probe(config)
+            ciphertext.write_bytes(reference)
+            observed["active_config_reference_object"] = probe(active)
+            observed["trusted_config_reference_object"] = probe(config)
+        observations.append(observed)
+        truth[case_id] = {"cause": cause, "expected": cause if has_controls else "insufficient"}
+    ciphertext.write_bytes(reference)
+    opening = json.dumps([secrets.token_hex(16), truth], sort_keys=True, separators=(",", ":"))
+    print("BLIND_COMMIT " + hashlib.sha256(opening.encode()).hexdigest())
+    for observation in observations:
+        print("BLIND_OBS " + json.dumps(observation))
+    print("BLIND_OPEN " + opening)
+
+
 def exercise(root):
     approved = root / "restore" / "result"
     approved.parent.mkdir(mode=0o700)
@@ -140,6 +189,7 @@ def exercise(root):
     print("Damaged ciphertext rejected; reference recovered byte-for-byte with same key")
 
     exercise_external_stop(root / "stop-test", good, original)
+    blind_cases(original, good, wrong, ciphertext, reference)
 
 
 if not __debug__:
