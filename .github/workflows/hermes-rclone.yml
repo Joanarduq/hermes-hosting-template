@@ -2,14 +2,14 @@ name: Hermes Rclone
 on:
   workflow_dispatch:
   push:
-    branches: [main]
-    paths: ['.github/workflows/hermes-rclone.yml', 'tests/two-tenants.sh']
+    branches: [main, 'pilot/hermes-restore-diagnostics']
+    paths: ['.github/workflows/hermes-rclone.yml', 'tests/two-tenants.sh', 'tests/restore-diagnostics.py']
   schedule:
     - cron: '17 11 * * *'
 permissions:
   contents: read
 concurrency:
-  group: hermes-rclone
+  group: hermes-rclone-${{ github.ref }}
   cancel-in-progress: false
 jobs:
   restore:
@@ -73,3 +73,5 @@ jobs:
           persist-credentials: false
       - name: Verificar dos clientes y cuota concurrente
         run: bash hermes-tests/tests/two-tenants.sh "$RUNNER_TEMP/hermes-rclone"
+      - name: Comprobar diagnóstico de restauración y destino temporal
+        run: python3 hermes-tests/tests/restore-diagnostics.py "$RUNNER_TEMP/hermes-rclone"
