@@ -8,6 +8,7 @@ on:
     - cron: '17 11 * * *'
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: hermes-rclone-${{ github.ref }}
   cancel-in-progress: false
@@ -75,8 +76,16 @@ jobs:
         run: bash hermes-tests/tests/two-tenants.sh "$RUNNER_TEMP/hermes-rclone"
       - name: Comprobar diagnóstico de restauración y destino temporal
         run: python3 hermes-tests/tests/restore-diagnostics.py "$RUNNER_TEMP/hermes-rclone"
-      - name: Crear respaldo sintético entre ejecuciones
-        if: github.ref == 'refs/heads/pilot/hermes-restore-diagnostics'
+      - name: Descargar el respaldo de la ejecución de origen
+        if: github.ref == 'refs/heads/pilot/hermes-restore-diagnostics' && github.event.head_commit.message == 'Verify retained Hermes fixture from run 43998087212'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: hermes-historical-synthetic
+          run-id: 43998087212
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/historical-vault
+      - name: Verificar restauración entre ejecuciones
+        if: github.ref == 'refs/heads/pilot/hermes-restore-diagnostics' && github.event.head_commit.message == 'Verify retained Hermes fixture from run 43998087212'
         shell: bash
         run: |
           set -euo pipefail
@@ -86,20 +95,12 @@ jobs:
           password=$(printf '%s' 'hermes-cross-run-public-fixture' | "$r" obscure -)
           export RCLONE_CONFIG="$RUNNER_TEMP/cross-run.conf"
           printf '[vault]\ntype = crypt\nremote = %s\npassword = %s\n' "$RUNNER_TEMP/historical-vault" "$password" > "$RCLONE_CONFIG"
-          source_dir=$(mktemp -d)
-          mkdir -p "$RUNNER_TEMP/historical-vault"
-          head -c 1048576 /dev/urandom > "$source_dir/probe.bin"
-          printf 'Hermes synthetic run %s\n' "$GITHUB_RUN_ID" > "$source_dir/origin.txt"
-          (cd "$source_dir" && sha256sum probe.bin origin.txt) > "$RUNNER_TEMP/historical-manifest"
-          sed 's/^/HERMES_REFERENCE /' "$RUNNER_TEMP/historical-manifest"
+          destination=$(mktemp -d)
+          test "$(find "$RUNNER_TEMP/historical-vault" -type f | wc -l)" -eq 2
           for file in probe.bin origin.txt; do
-            "$r" copyto "$source_dir/$file" "vault:$file"
+            "$r" copyto "vault:$file" "$destination/$file"
           done
-      - name: Conservar respaldo cifrado de prueba
-        if: github.ref == 'refs/heads/pilot/hermes-restore-diagnostics'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: hermes-historical-synthetic
-          path: ${{ runner.temp }}/historical-vault/
-          if-no-files-found: error
-          retention-days: 7
+          cd "$destination"
+          printf '%s  %s\n' '634709360e09f46c10fb20db2cd6eb445c5431e73b2bdf4cfda47a907d5d93f7' probe.bin '5533c2fcde267a70fa33e9759e9952b9f0f4532180bffee2a6d57df6b4e7838a' origin.txt | sha256sum --check --strict
+          test "$(cat origin.txt)" = 'Hermes synthetic run 43998087212'
+          echo 'HERMES_CROSS_RUN_OK source=43998087212 restored=2'
