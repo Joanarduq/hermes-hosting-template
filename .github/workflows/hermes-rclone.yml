@@ -75,3 +75,31 @@ jobs:
         run: bash hermes-tests/tests/two-tenants.sh "$RUNNER_TEMP/hermes-rclone"
       - name: Comprobar diagnóstico de restauración y destino temporal
         run: python3 hermes-tests/tests/restore-diagnostics.py "$RUNNER_TEMP/hermes-rclone"
+      - name: Crear respaldo sintético entre ejecuciones
+        if: github.ref == 'refs/heads/pilot/hermes-restore-diagnostics'
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          r="$RUNNER_TEMP/hermes-rclone"
+          # Public disposable credential for synthetic test data only.
+          password=$(printf '%s' 'hermes-cross-run-public-fixture' | "$r" obscure -)
+          export RCLONE_CONFIG="$RUNNER_TEMP/cross-run.conf"
+          printf '[vault]\ntype = crypt\nremote = %s\npassword = %s\n' "$RUNNER_TEMP/historical-vault" "$password" > "$RCLONE_CONFIG"
+          source_dir=$(mktemp -d)
+          mkdir -p "$RUNNER_TEMP/historical-vault"
+          head -c 1048576 /dev/urandom > "$source_dir/probe.bin"
+          printf 'Hermes synthetic run %s\n' "$GITHUB_RUN_ID" > "$source_dir/origin.txt"
+          (cd "$source_dir" && sha256sum probe.bin origin.txt) > "$RUNNER_TEMP/historical-manifest"
+          sed 's/^/HERMES_REFERENCE /' "$RUNNER_TEMP/historical-manifest"
+          for file in probe.bin origin.txt; do
+            "$r" copyto "$source_dir/$file" "vault:$file"
+          done
+      - name: Conservar respaldo cifrado de prueba
+        if: github.ref == 'refs/heads/pilot/hermes-restore-diagnostics'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: hermes-historical-synthetic
+          path: ${{ runner.temp }}/historical-vault/
+          if-no-files-found: error
+          retention-days: 7
